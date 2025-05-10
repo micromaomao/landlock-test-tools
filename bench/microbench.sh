@@ -60,15 +60,21 @@ get_file "tools/perf/perf" make -C "tools/perf"
 
 run_test() {
 	local d="$1"
-	local sandboxer="${2:-}"
-	local cmd=(env LL_FS_RO=/ LL_FS_RW=/ IN_BENCHMARK_NS=1 unshare --mount -- ./run-bench-in-namespace.sh ./perf trace -s -e openat -- ${sandboxer} ./open-ntimes "${NUM_ITERATIONS}" 0 "$d")
+	local nb_extra_rules="$2"
+	local sandboxer="${3:-}"
+	local cmd=(
+		env LL_FS_RO=/ LL_FS_RW=/ IN_BENCHMARK_NS=1 NB_EXTRA_RULES=$nb_extra_rules unshare --mount --
+		./run-bench-in-namespace.sh ./perf trace -s -e openat --
+		${sandboxer} ./open-ntimes "${NUM_ITERATIONS}" 0 "$d"
+	)
 
 	if [[ -n "${sandboxer}" ]]; then
 		echo -n "[*] with sandbox"
 	else
 		echo -n "[*] without sandbox"
 	fi
-	echo " d=$d"
+	echo -n " d=$d"
+	echo " nb_extra_rules=$nb_extra_rules"
 
 	if [[ -n "${SSH_HOST}" ]]; then
 		echo "[+] ssh ${SSH_HOST} ${cmd[*]}"
@@ -80,6 +86,8 @@ run_test() {
 }
 
 for d in / /1/2/3/4/5/6/7/8/9/ /1/2/3/4/5/6/7/8/9/0/1/2/3/4/5/6/7/8/9 /1/2/3/4/5/6/7/8/9/0/1/2/3/4/5/6/7/8/9/0/1/2/3/4/5/6/7/8/9; do
-	run_test "$d" 2>&1
-	run_test "$d" ./sandboxer 2>&1
+	for nb_extra_rules in 0 100 1000 10000; do
+		run_test "$d" $nb_extra_rules 2>&1
+		run_test "$d" $nb_extra_rules ./sandboxer 2>&1
+	done
 done

@@ -36,6 +36,11 @@ cp open-ntimes /mnt/
 
 mkdir /mnt/old
 mkdir -p /mnt/1/2/3/4/5/6/7/8/9/0/1/2/3/4/5/6/7/8/9/0/1/2/3/4/5/6/7/8/9
+for i in $(seq 1 $NB_EXTRA_RULES); do
+	mkdir -p "/mnt/_$i"
+	LL_FS_RO+=":/_$i"
+done
+sync
 
 cd /mnt
 pivot_root . old
