@@ -1,1 +1,4 @@
+*.log
 /open-ntimes
+/perf
+/sandboxer
