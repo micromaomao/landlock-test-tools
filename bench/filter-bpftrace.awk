@@ -3,14 +3,18 @@
 #
 # Copyright © 2025 Tingmao Wang <m@maowtm.org>.
 
-$1 == "[*]" {
-	in_output = 0
-	print ""
-	print
-}
-
 BEGIN {
 	in_output = 0
+	show_hist = 0
+}
+
+$1 == "[*]" {
+	print ""
+}
+
+$1 == "[*]" || /^=>/  {
+	in_output = 0
+	print
 }
 
 /^@/ {
@@ -21,6 +25,6 @@ NF == 0 {
 	in_output = 0
 }
 
-in_output {
+in_output && show_hist {
 	print
 }
