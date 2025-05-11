@@ -105,11 +105,18 @@ run_test() {
 for d in / /1/2/3/4/5/6/7/8/9/ /1/2/3/4/5/6/7/8/9/0/1/2/3/4/5/6/7/8/9 /1/2/3/4/5/6/7/8/9/0/1/2/3/4/5/6/7/8/9/0/1/2/3/4/5/6/7/8/9; do
 	for nb_extra_rules in 0 100 1000 10000; do
 		if [[ $TRACE_OVERHEAD_LOG_FILE != "" ]]; then
-			echo "[*] d = $d nb_extra_rules = $nb_extra_rules" >> "$TRACE_OVERHEAD_LOG_FILE"
+			echo "[*] without landlock: d = $d nb_extra_rules = $nb_extra_rules" >> "$TRACE_OVERHEAD_LOG_FILE"
 			bpftrace landlock_overhead.bt $RUN_ON_CPU >> "$TRACE_OVERHEAD_LOG_FILE" &
 			bpftrace_pid=$!
 		fi
 		run_test "$d" $nb_extra_rules 2>&1
+		if [[ $TRACE_OVERHEAD_LOG_FILE != "" ]]; then
+			kill -INT $bpftrace_pid
+			wait $bpftrace_pid
+			echo "[*] with landlock: d = $d nb_extra_rules = $nb_extra_rules" >> "$TRACE_OVERHEAD_LOG_FILE"
+			bpftrace landlock_overhead.bt $RUN_ON_CPU >> "$TRACE_OVERHEAD_LOG_FILE" &
+			bpftrace_pid=$!
+		fi
 		run_test "$d" $nb_extra_rules ./sandboxer 2>&1
 		if [[ $TRACE_OVERHEAD_LOG_FILE != "" ]]; then
 			kill -INT $bpftrace_pid
