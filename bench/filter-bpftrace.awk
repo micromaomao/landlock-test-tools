@@ -5,7 +5,7 @@
 
 BEGIN {
 	in_output = 0
-	show_hist = 0
+	show_hist = 1
 }
 
 $1 == "[*]" {
