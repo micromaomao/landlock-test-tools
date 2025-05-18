@@ -20,7 +20,9 @@ kretfunc:hook_file_open /cpu == TARGET_CPU && @open_syscall_start_time[tid] && @
 t:syscalls:sys_exit_open, t:syscalls:sys_exit_openat, t:syscalls:sys_exit_openat2 /cpu == TARGET_CPU && @open_syscall_start_time[tid]/
 {
 	if (@hook_open_duration[tid] == 0) {
-		@nb_not_landlocked_opens[comm] += 1;
+		@nb_not_landlocked_opens[comm] = count();
+		delete(@open_syscall_start_time[tid]);
+		return;
 	}
 
 	$duration_open_syscall = nsecs - @open_syscall_start_time[tid];
@@ -48,7 +50,7 @@ t:syscalls:sys_exit_open, t:syscalls:sys_exit_openat, t:syscalls:sys_exit_openat
 END {
 	for ($kv : @nb_not_landlocked_opens) {
 		if ($kv.1 > 10) {
-			printf("WARN: %s had %d opens that did not call landlock hook\n", $kv.0, $kv.1);
+			printf("WARN: %s had %d opens that did not call landlock hook\n", $kv.0, (int32)$kv.1);
 		}
 	}
 
