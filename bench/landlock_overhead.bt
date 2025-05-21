@@ -41,13 +41,13 @@ t:syscalls:sys_exit_open, t:syscalls:sys_exit_openat, t:syscalls:sys_exit_openat
 	@latency_landlock_hook_min = min($duration_hook_file_open);
 	@latency_landlock_hook_max = max($duration_hook_file_open);
 	@latency_landlock_hook_avg = avg($duration_hook_file_open);
-	@latency_open_syscall = lhist($duration_open_syscall, 3000, 8000, 250);
+	@latency_open_syscall = lhist($duration_open_syscall, 1500, 7250, 100);
 	@latency_open_syscall_min = min($duration_open_syscall);
 	@latency_open_syscall_max = max($duration_open_syscall);
 	@latency_open_syscall_avg = avg($duration_open_syscall);
 
 	$overhead_percent = ($duration_hook_file_open * 100) / $duration_open_syscall;
-	@landlock_hook_overhead = lhist($overhead_percent, 0, 100, 5);
+	@landlock_hook_overhead = lhist($overhead_percent, 0, 100, 2);
 	@landlock_hook_overhead_min = min($overhead_percent);
 	@landlock_hook_overhead_max = max($overhead_percent);
 	@landlock_hook_overhead_avg = avg($overhead_percent);
