@@ -21,6 +21,9 @@ BASE_DIR="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 KERNEL="$1"
 shift
 
+COVERAGE_DIR="$1"
+shift
+
 if [[ "${1:-}" != "--" ]] then
 	echo "ERROR: Missing '--' argument" >&2
 	exit 1
@@ -64,9 +67,15 @@ echo "[*] Booting kernel ${KERNEL}"
 # vng --ssh
 # ssh -F ~/.cache/virtme-ng/.ssh/virtme-ng-ssh.conf -o IdentityFile=~/.ssh/id_virtme-ng-landlock-test -l root ssh://virtme-ng:2222
 
+ARGS=()
+if [[ -n "${COVERAGE_DIR}" ]]; then
+	ARGS+=(--rwdir "${COVERAGE_DIR}")
+fi
+
 vng --run "${KERNEL}" \
 	--verbose \
 	--user root \
+	"${ARGS[@]}" \
 	--append "loglevel=4" \
 	--append "TEST_PATH=${BASE_DIR}/guest:${PATH:-/usr/bin}" \
 	--append "TERM=${TERM:-linux}" \
