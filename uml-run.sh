@@ -21,21 +21,11 @@ BASE_DIR="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 KERNEL="$1"
 shift
 
-has_double_dash() {
-	local arg
-
-	for arg in "$@"; do
-		if [[ "${arg}" == "--" ]]; then
-			return 0
-		fi
-	done
-	return 1
-}
-
-if ! has_double_dash "$@"; then
+if [[ "${1:-}" != "--" ]] then
 	echo "ERROR: Missing '--' argument" >&2
 	exit 1
 fi
+shift
 
 # Looks first for a known kernel.
 KERNEL_ARTIFACT="${BASE_DIR}/kernels/artifacts/${KERNEL}"
@@ -81,6 +71,6 @@ echo "[*] Booting kernel ${KERNEL}"
 	"TEST_UID=$(id -u)" \
 	"TEST_CWD=$(pwd)" \
 	"TEST_RET=${OUT_RET}" \
-	$*
+	"TEST_EXEC=$(printf "%s" "$*" | base64 --wrap=0)"
 
 exit "$(< "${OUT_RET}")"
