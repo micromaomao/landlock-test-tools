@@ -9,28 +9,39 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
+
+bool has_verbose(void) {
+	const char *verbose = getenv("VERBOSE");
+	return verbose && strcmp(verbose, "0") != 0;
+}
 
 int main(int argc, char *argv[]) {
 	ssize_t ntimes;
 	int err;
 	const char *path;
+	bool verbose = has_verbose();
 
 	if (argc != 4)
 		return 1;
 
 	ntimes = atoi(argv[1]);
-	printf("ntimes: %ld\n", ntimes);
+	if (verbose)
+		printf("[#] ntimes: %ld\n", ntimes);
 	if (ntimes <= 0)
 		return 1;
 
 	err = atoi(argv[2]);
-	printf("expected errno: %ld\n", err);
+	if (verbose)
+		printf("[#] expected errno: %d\n", err);
 
 	path = argv[3];
-	printf("path: %s\n", path);
+	if (verbose)
+		printf("[#] path: %s\n", path);
 
 	for (size_t i = 0; i < ntimes; i++) {
 		int fd = open(path, O_RDONLY);
@@ -45,9 +56,6 @@ int main(int argc, char *argv[]) {
 				return 1;
 			}
 			close(fd);
-		}
-		if (i % (ntimes / 10) == 0) {
-			printf("i: %ld\n", i);
 		}
 	}
 	return 0;

@@ -17,24 +17,87 @@ NUM_ITERATIONS="1000000"
 DIRNAME="$(dirname -- "${BASH_SOURCE[0]}")"
 BASENAME="$(basename -- "${BASH_SOURCE[0]}")"
 
-TRACE_OVERHEAD_LOG_FILE="${TRACE_OVERHEAD_LOG_FILE-}"
-RUN_ON_CPU="${RUN_ON_CPU-}"
+RUN_ON_CPU=""
+DO_BPFTRACE=0
+SSH_HOST=""
+VERBOSE=0
+NB_TRIALS=1
+PERF_TRACE_OPENAT=0
 
-if [[ $# -gt 1 ]]; then
-	echo "usage: [[TRACE_OVERHEAD_LOG_FILE=<file_name>] RUN_ON_CPU=<nb>] ${BASENAME} [ssh-host] | .../filter-microbench.awk" >&2
+print_usage() {
+	echo "Usage: ${BASENAME} [--cpu <cpu_number>] [--bpftrace] [--ssh <host>]"
+	echo "  --cpu <cpu_number>   Run the benchmark on the specified CPU core."
+	echo "                       (default: all CPUs if not using bpftrace, or 0)"
+	echo "  --bpftrace           Use bpftrace to measure Landlock overhead."
+	echo "  --ssh <host>         Use SSH to run the benchmark on the specified host."
+	echo "  --verbose            Enable verbose output."
+	echo "  --trials             <number>"
+	echo "      Number of trials for each test size (default: ${NB_TRIALS})."
+	echo "      This is probably only necessary for hashtable benchmarks."
+	echo "  --perf-trace-openat"
+	echo "      Use perf trace to measure openat syscall."
+	echo "      Tends to slow things down.  Mutually exclusive with --bpftrace."
+	exit 1
+}
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--cpu)
+			shift
+			if [[ $# -eq 0 ]]; then
+				print_usage
+			fi
+			RUN_ON_CPU="$1"
+			shift
+			;;
+		--bpftrace)
+			DO_BPFTRACE=1
+			shift
+			;;
+		--ssh)
+			shift
+			if [[ $# -eq 0 ]]; then
+				print_usage
+			fi
+			SSH_HOST="$1"
+			shift
+			;;
+		--verbose)
+			VERBOSE=1
+			shift
+			;;
+		--trials)
+			shift
+			if [[ $# -eq 0 ]]; then
+				print_usage
+			fi
+			NB_TRIALS="$1"
+			shift
+			;;
+		--perf-trace-openat)
+			PERF_TRACE_OPENAT=1
+			shift
+			;;
+		*)
+			print_usage
+			;;
+	esac
+done
+
+print_verbose() {
+	if [[ $VERBOSE -eq 1 ]]; then
+		echo "[#]" "$@"
+	fi
+}
+
+if [[ -z "$RUN_ON_CPU" && $DO_BPFTRACE -eq 1 ]]; then
+	RUN_ON_CPU=0
+fi
+
+if [[ $DO_BPFTRACE -eq 1 && $PERF_TRACE_OPENAT -eq 1 ]]; then
+	echo "ERROR: Can only do one of --bpftrace and --perf-trace-openat" >&2
 	exit 1
 fi
-
-if [[ $TRACE_OVERHEAD_LOG_FILE != "" && $RUN_ON_CPU == "" ]]; then
-	echo "Must set RUN_ON_CPU as well to trace overhead." >&2
-	exit 1
-fi
-
-if [ -e "$TRACE_OVERHEAD_LOG_FILE" ]; then
-	echo "$TRACE_OVERHEAD_LOG_FILE already exists, you might want to provide a new name." >&2
-fi
-
-SSH_HOST="${1:-}"
 
 BUILD_DIR=".out-landlock_local-x86_64-gcc"
 
@@ -71,56 +134,91 @@ get_file "${DIRNAME}/run-bench-in-namespace.sh"
 get_file "${BUILD_DIR}/samples/landlock/sandboxer"
 get_file "tools/perf/perf" make -C "tools/perf"
 
+print_test_setup_json() {
+	local do_landlock="$1"
+	local dir_depth="$2"
+	local nb_extra_rules="$3"
+
+	jq -nc \
+		--arg do_landlock "$do_landlock" \
+		--arg dir_depth "$dir_depth" \
+		--arg nb_extra_rules "$nb_extra_rules" \
+		'{
+			landlock: ($do_landlock == "1"),
+			dir_depth: ($dir_depth | tonumber),
+			nb_extra_rules: ($nb_extra_rules | tonumber)
+		}'
+}
+
 run_test() {
-	local d="$1"
-	local nb_extra_rules="$2"
-	local sandboxer="${3:-}"
+	local do_landlock="$1"
+	local dir_depth="$2"
+	local nb_extra_rules="$3"
 	local maybe_taskset=()
 	if [[ -n "${RUN_ON_CPU}" ]]; then
 		maybe_taskset=(taskset -c "${RUN_ON_CPU}")
 	fi
+	local maybe_sandboxer=()
+	if [[ $do_landlock -eq 1 ]]; then
+		maybe_sandboxer=("./sandboxer")
+	fi
+	local d="$(echo /1/2/3/4/5/6/7/8/9/0/1/2/3/4/5/6/7/8/9/0/1/2/3/4/5/6/7/8/9 | head -c $((dir_depth * 2 + 1)))"
+	local LL_FS_RO=/
+	local LL_FS_RW=/
+	for i in $(seq 1 $nb_extra_rules); do
+		LL_FS_RO+=":/extra_rules/_$i"
+	done
+	local expected_errno=0
+	local maybe_perf=()
+	if [[ $PERF_TRACE_OPENAT -eq 1 ]]; then
+		maybe_perf=(perf trace)
+		if [[ -n "${RUN_ON_CPU}" ]]; then
+			maybe_perf+=( -C "${RUN_ON_CPU}" )
+		fi
+		maybe_perf+=(-s -e openat --)
+	fi
+	local maybe_ssh=()
+	if [[ -n "${SSH_HOST}" ]]; then
+		maybe_ssh=(ssh "$SSH_HOST" --)
+	fi
 	local cmd=(
-		env LL_FS_RO=/ LL_FS_RW=/ IN_BENCHMARK_NS=1 NB_EXTRA_RULES=$nb_extra_rules unshare --mount --
-		./run-bench-in-namespace.sh ./perf trace -s -e openat --
-		${sandboxer} ${maybe_taskset[@]} ./open-ntimes "${NUM_ITERATIONS}" 0 "$d"
+		"${maybe_ssh[@]}"
+		env LL_FS_RO="$LL_FS_RO" LL_FS_RW="$LL_FS_RW" IN_BENCHMARK_NS=1 VERBOSE=$VERBOSE unshare --mount --
+		./run-bench-in-namespace.sh "${maybe_perf[@]}" "${maybe_sandboxer[@]}" "${maybe_taskset[@]}"
+		./open-ntimes "$NUM_ITERATIONS" "$expected_errno" "$d"
 	)
 
-	if [[ -n "${sandboxer}" ]]; then
-		echo -n "[*] with sandbox"
-	else
-		echo -n "[*] without sandbox"
-	fi
-	echo -n " d=$d"
-	echo " nb_extra_rules=$nb_extra_rules"
+	print_test_setup_json "$do_landlock" "$dir_depth" "$nb_extra_rules"
+	print_verbose "Running command: ${cmd[*]}"
 
-	if [[ -n "${SSH_HOST}" ]]; then
-		echo "[+] ssh ${SSH_HOST} ${cmd[*]}"
-		ssh "${SSH_HOST}" -- "${cmd[@]}"
-	else
-		echo "[+] ${cmd[*]}"
-		"${cmd[@]}"
+	local bpftrace_pid=""
+	if [[ $DO_BPFTRACE -ne 0 ]]; then
+		local bpftrace_cmd=(
+			bpftrace -f json landlock_overhead.bt $RUN_ON_CPU
+		)
+		print_verbose "Running command: ${bpftrace_cmd[*]}"
+		"${maybe_ssh[@]}" "${bpftrace_cmd[@]}" &
+		bpftrace_pid=$!
+	fi
+
+	"${cmd[@]}"
+
+	if [[ -n "$bpftrace_pid" ]]; then
+		kill -INT $bpftrace_pid
+		wait $bpftrace_pid
 	fi
 }
 
-for d in / /1/2/3/4/5/6/7/8/9/ /1/2/3/4/5/6/7/8/9/0/1/2/3/4/5/6/7/8/9 /1/2/3/4/5/6/7/8/9/0/1/2/3/4/5/6/7/8/9/0/1/2/3/4/5/6/7/8/9; do
-	for nb_extra_rules in 0 100; do
-		if [[ $TRACE_OVERHEAD_LOG_FILE != "" ]]; then
-			echo "[*] without landlock: d = $d nb_extra_rules = $nb_extra_rules" >> "$TRACE_OVERHEAD_LOG_FILE"
-			bpftrace landlock_overhead.bt $RUN_ON_CPU >> "$TRACE_OVERHEAD_LOG_FILE" &
-			bpftrace_pid=$!
-		fi
-		run_test "$d" $nb_extra_rules 2>&1
-		if [[ $TRACE_OVERHEAD_LOG_FILE != "" ]]; then
-			kill -INT $bpftrace_pid
-			wait $bpftrace_pid
-			echo "[*] with landlock: d = $d nb_extra_rules = $nb_extra_rules" >> "$TRACE_OVERHEAD_LOG_FILE"
-			bpftrace landlock_overhead.bt $RUN_ON_CPU >> "$TRACE_OVERHEAD_LOG_FILE" &
-			bpftrace_pid=$!
-		fi
-		run_test "$d" $nb_extra_rules ./sandboxer 2>&1
-		if [[ $TRACE_OVERHEAD_LOG_FILE != "" ]]; then
-			kill -INT $bpftrace_pid
-			wait $bpftrace_pid
-		fi
+for i in $(seq 1 $NB_TRIALS); do
+	print_verbose "Running trial $i for no Landlock"
+	run_test 0 0 0
+done
+
+for depth in 0 1 5 10 20 29; do
+	for nb_extra_rules in 0 1 5 10 30 50 100 150 200; do
+		for i in $(seq 1 $NB_TRIALS); do
+			print_verbose "Running trial $i for depth $depth with $nb_extra_rules extra rules"
+			run_test 1 $depth $nb_extra_rules
+		done
 	done
 done
