@@ -209,12 +209,11 @@ run_test() {
 	fi
 }
 
-for i in $(seq 1 $NB_TRIALS); do
-	print_verbose "Running trial $i for no Landlock"
-	run_test 0 0 0
-done
-
 for depth in 0 1 5 10 20 29; do
+	for i in $(seq 1 $NB_TRIALS); do
+		print_verbose "Running trial $i for no Landlock"
+		run_test 0 $depth 0
+	done
 	for nb_extra_rules in 0 1 5 10 30 50 100 150 200; do
 		for i in $(seq 1 $NB_TRIALS); do
 			print_verbose "Running trial $i for depth $depth with $nb_extra_rules extra rules"
