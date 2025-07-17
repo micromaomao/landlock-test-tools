@@ -5,6 +5,7 @@
  * Copyright © 2025 Tingmao Wang <m@maowtm.org>
  *
  * Usage: ./landlock_overhead.bt <target_cpu>
+ * (target_cpu is required)
  */
 
 #define TARGET_CPU $1
@@ -37,11 +38,11 @@ t:syscalls:sys_exit_open, t:syscalls:sys_exit_openat, t:syscalls:sys_exit_openat
 	$duration_open_syscall = nsecs - @open_syscall_start_time[tid];
 	$duration_hook_file_open = @hook_open_duration[tid];
 
-	@latency_landlock_hook = lhist($duration_hook_file_open, 0, 2000, 50);
+	@latency_landlock_hook = lhist($duration_hook_file_open, 0, 4000, 50);
 	@latency_landlock_hook_min = min($duration_hook_file_open);
 	@latency_landlock_hook_max = max($duration_hook_file_open);
 	@latency_landlock_hook_avg = avg($duration_hook_file_open);
-	@latency_open_syscall = lhist($duration_open_syscall, 1500, 7250, 100);
+	@latency_open_syscall = lhist($duration_open_syscall, 1000, 10000, 100);
 	@latency_open_syscall_min = min($duration_open_syscall);
 	@latency_open_syscall_max = max($duration_open_syscall);
 	@latency_open_syscall_avg = avg($duration_open_syscall);
@@ -59,22 +60,7 @@ t:syscalls:sys_exit_open, t:syscalls:sys_exit_openat, t:syscalls:sys_exit_openat
 END {
 	for ($kv : @nb_not_landlocked_opens) {
 		if ($kv.1 > 10) {
-			printf("WARN: %s had %d opens that did not call landlock hook\n", $kv.0, (int32)$kv.1);
+			printf("WARNING: %s had %d opens that did not call Landlock hook\n", $kv.0, (int32)$kv.1);
 		}
 	}
-
-	printf("=> landlock hook took average %d ns (%d ns min, %d ns max)\n", (int32)@latency_landlock_hook_avg, (int32)@latency_landlock_hook_min, (int32)@latency_landlock_hook_max);
-	clear(@latency_landlock_hook_avg);
-	clear(@latency_landlock_hook_min);
-	clear(@latency_landlock_hook_max);
-	printf("=> open syscall took average %d ns (%d ns min, %d ns max)\n", (int32)@latency_open_syscall_avg, (int32)@latency_open_syscall_min, (int32)@latency_open_syscall_max);
-	clear(@latency_open_syscall_avg);
-	clear(@latency_open_syscall_min);
-	clear(@latency_open_syscall_max);
-	printf("=> landlock hook overhead (percent) average is %d (%d min, %d max)\n", (int32)@landlock_hook_overhead_avg, (int32)@landlock_hook_overhead_min, (int32)@landlock_hook_overhead_max);
-	clear(@landlock_hook_overhead_avg);
-	clear(@landlock_hook_overhead_min);
-	clear(@landlock_hook_overhead_max);
-
-	clear(@nb_not_landlocked_opens);
 }
