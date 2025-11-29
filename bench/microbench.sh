@@ -11,8 +11,7 @@
 
 set -e -u -o pipefail
 
-# In sync with to filter-microbench.awk
-NUM_ITERATIONS="1000000"
+NUM_ITERATIONS="500000"
 
 DIRNAME="$(dirname -- "${BASH_SOURCE[0]}")"
 BASENAME="$(basename -- "${BASH_SOURCE[0]}")"
@@ -21,7 +20,7 @@ RUN_ON_CPU=""
 DO_BPFTRACE=0
 SSH_HOST=""
 VERBOSE=0
-NB_TRIALS=1
+NB_TRIALS=5
 PERF_TRACE_OPENAT=0
 
 print_usage() {
@@ -86,7 +85,7 @@ done
 
 print_verbose() {
 	if [[ $VERBOSE -eq 1 ]]; then
-		echo "[#]" "$@"
+		echo "[#]" "$@" >&2
 	fi
 }
 
@@ -201,14 +200,12 @@ run_test() {
 	fi
 }
 
-for depth in 0 1 5 10 20 29; do
-	for i in $(seq 1 $NB_TRIALS); do
-		print_verbose "Running trial $i for no Landlock"
+for trial in $(seq 1 $NB_TRIALS); do
+	for depth in 0 1 5 10 20 29; do
+		print_verbose "Running trial $trial for no Landlock"
 		run_test 0 $depth 0
-	done
-	for nb_extra_rules in 0 1 5 10 30 50 100 150 200; do
-		for i in $(seq 1 $NB_TRIALS); do
-			print_verbose "Running trial $i for depth $depth with $nb_extra_rules extra rules"
+		for nb_extra_rules in 0 1 5 10 30 50 100 150 200; do
+			print_verbose "Running trial $trial for depth $depth with $nb_extra_rules extra rules"
 			run_test 1 $depth $nb_extra_rules
 		done
 	done

@@ -76,8 +76,10 @@ class Stats:
     avg: float
     min: float
     max: float
+    sum_of_squares: float
     median: float
     stddev: float
+    batch_count: int
 
     def p95_confidence(self) -> Tuple[float, float]:
         # Assuming a normal distribution, 95% confidence interval is approximately
@@ -102,6 +104,9 @@ def process_bpf_metric(name, bpf_data, bpf_data_type) -> Stats:
     max_val = bpf_data[name + "_max"]
     if not isinstance(max_val, int):
         raise ValueError(f"Expected {name}_max to be an int")
+    s2x = bpf_data[name + "_s2x"]
+    if not isinstance(s2x, int):
+        raise ValueError(f"Expected {name}_s2x to be an int")
 
     for bucket in hist:
         if "min" not in bucket:
@@ -122,29 +127,19 @@ def process_bpf_metric(name, bpf_data, bpf_data_type) -> Stats:
             break
         curr_seen += count
 
-    # Find standard deviation from the histogram
-    var = 0.0
-    for bucket in hist:
-        start = bucket["min"]
-        end = bucket["max"]
-        count = bucket["count"]
-        midpoint = (start + end) / 2
-        if end == max_val:
-            # For the purpose of standard deviation, we avoid outliers
-            # massively skewing the result by pretending that most of the
-            # values in this bucket is at the front.
-            midpoint = start
-        var += count * ((midpoint - avg) ** 2)
-
-    var /= total
+    # variance = E[X^2] - (E[X])^2
+    var = (s2x / total) - (avg ** 2)
     stddev = var ** 0.5
+
     return Stats(
         count=total,
         avg=avg,
         min=min_val,
         max=max_val,
+        sum_of_squares=s2x,
         median=median,
         stddev=stddev,
+        batch_count=1,
     )
 
 metrics_ordered = ["c_measured_syscall_time_ns"]
@@ -152,7 +147,7 @@ metrics_ordered = ["c_measured_syscall_time_ns"]
 def parse_test_jsons(test_jsons: List[dict]) -> dict:
     cstats_lines = [l for l in test_jsons if l["type"] == "cstats"]
     if len(cstats_lines) != 1:
-        raise ValueError("Expected exactly one cstats line per test")
+        return None
     cstats = cstats_lines[0]
     bpf_data = {}
     bpf_data_type = {}
@@ -179,8 +174,10 @@ def parse_test_jsons(test_jsons: List[dict]) -> dict:
         avg=cstats["mean"],
         min=cstats["min"],
         max=cstats["max"],
+        sum_of_squares=cstats["sum_of_squares"],
         median=-1,
         stddev=cstats["stddev"],
+        batch_count=1,
     )
 
     return result_metrics
@@ -204,11 +201,17 @@ def merge_results(stats1: Stats, stats2: Stats) -> Stats:
     min_val = min(stats1.min, stats2.min)
     max_val = max(stats1.max, stats2.max)
     if stats1.median >= 0 and stats2.median >= 0:
+        # best effort
         median = (stats1.median * stats1.count + stats2.median * stats2.count) / total_count
     else:
         median = -1
-    stddev = ((stats1.stddev ** 2 * stats1.count + stats2.stddev ** 2 * stats2.count) / total_count) ** 0.5
-    return Stats(total_count, avg, min_val, max_val, median, stddev)
+    sum_of_squares = stats1.sum_of_squares + stats2.sum_of_squares
+    # var = E[X^2] - (E[X])^2
+    var = (sum_of_squares / total_count) - (avg ** 2)
+    stddev = var ** 0.5
+    batch_count = stats1.batch_count + stats2.batch_count
+
+    return Stats(total_count, avg, min_val, max_val, sum_of_squares, median, stddev, batch_count)
 
 for input_file in inputs:
     with open(input_file, "rt") as f:
@@ -224,7 +227,10 @@ for input_file in inputs:
                 test_descs_ordered.append(testd)
             if testd not in tests[variant_name]:
                 tests[variant_name][testd] = {}
-            for metric_name, metric_stats in parse_test_jsons(test[1:]).items():
+            parsed = parse_test_jsons(test[1:])
+            if not parsed:
+                continue
+            for metric_name, metric_stats in parsed.items():
                 if metric_name not in tests[variant_name][testd]:
                     tests[variant_name][testd][metric_name] = metric_stats
                 else:
@@ -246,7 +252,7 @@ for test_desc in test_descs_ordered:
     for metric_name in metrics_ordered:
         base_stats = tests[base_variant][test_desc][metric_name]
         print(f"  {base_variant}:")
-        print(f"    {metric_name}: {base_stats.count} samples, "
+        print(f"    {metric_name}: {base_stats.count} samples ({base_stats.batch_count} trials), "
               f"avg={base_stats.avg:.2f}, min={base_stats.min:.2f}, "
               f"max={base_stats.max:.2f}, median={base_stats.median:.2f}, "
               f"stddev={base_stats.stddev:.2f}")
@@ -264,15 +270,17 @@ for test_desc in test_descs_ordered:
                 print(f"    {metric_name}: no data")
                 continue
             stats = variant_stats[metric_name]
-            print(f"    {metric_name}: {stats.count} samples, "
+            print(f"    {metric_name}: {stats.count} samples ({stats.batch_count} trials), "
                   f"avg={stats.avg:.2f}, min={stats.min:.2f}, "
                   f"max={stats.max:.2f}, median={stats.median:.2f}, "
                   f"stddev={stats.stddev:.2f}")
             test_low, test_high = stats.p95_confidence()
             print(f"    95% confidence interval: [{test_low:.2f} .. {test_high:.2f}]")
             if test_high < base_low:
-                print("    ** Improved **")
+                change = (base_stats.avg - stats.avg) / base_stats.avg * 100
+                print(f"    ** Improved {change:.1f}% **")
             elif test_low > base_high:
-                print("    ** Worse **")
+                change = (stats.avg - base_stats.avg) / base_stats.avg * 100
+                print(f"    ** Worsened {change:.1f}% **")
             else:
                 print("    (No significant difference)")

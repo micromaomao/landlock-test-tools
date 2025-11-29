@@ -50,8 +50,9 @@ static void print_stats(const struct stats *stats, uint64_t ntimes)
 	double stddev = sqrt(variance);
 
 	printf("{\"type\":\"cstats\",\"ntimes\":%lu,\"mean\":%.4f,\"stddev\":%.4f,"
-	       "\"min\":%lu,\"max\":%lu}\n",
-	       ntimes, mean, stddev, stats->min, stats->max);
+	       "\"min\":%lu,\"max\":%lu,\"sum_of_squares\":%lu}\n",
+	       ntimes, mean, stddev, stats->min, stats->max,
+	       stats->sum_of_squares);
 }
 
 int main(int argc, char *argv[])
