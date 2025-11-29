@@ -34,8 +34,10 @@ class Stats:
     avg: float
     min: float
     max: float
+    sum_of_squares: float
     median: float
     stddev: float
+    batch_count: int
 
     def p95_confidence(self) -> Tuple[float, float]:
         """
@@ -197,43 +199,28 @@ def merge_results(stats1: Stats, stats2: Stats) -> Stats:
     """
     Merge two Stats objects into one combined Stats object.
     
-    Uses the parallel axis theorem (correct pooled variance formula) that 
-    accounts for differences in means between the two samples:
-    
-    var_combined = [n1*(var1 + delta1²) + n2*(var2 + delta2²)] / (n1 + n2)
-    
-    where delta1 = mean1 - combined_mean, delta2 = mean2 - combined_mean
-    
-    Note: Median cannot be correctly computed from summary statistics alone,
-    so we mark it as unavailable (-1) when merging.
+    Uses the formula var = E[X²] - E[X]² with the combined sum of squares.
     """
     if stats1.count == 0:
         return stats2
     if stats2.count == 0:
         return stats1
-    
-    n1, n2 = stats1.count, stats2.count
-    total_count = n1 + n2
-    
-    # Combined mean
-    avg = (stats1.avg * n1 + stats2.avg * n2) / total_count
-    
-    # Min/max
+    total_count = stats1.count + stats2.count
+    avg = (stats1.avg * stats1.count + stats2.avg * stats2.count) / total_count
     min_val = min(stats1.min, stats2.min)
     max_val = max(stats1.max, stats2.max)
-    
-    # Median cannot be correctly computed from summary statistics
-    median = -1
-    
-    # Correct pooled variance using parallel axis theorem
-    var1 = stats1.stddev ** 2
-    var2 = stats2.stddev ** 2
-    delta1 = stats1.avg - avg
-    delta2 = stats2.avg - avg
-    pooled_var = (n1 * (var1 + delta1 ** 2) + n2 * (var2 + delta2 ** 2)) / total_count
-    stddev = math.sqrt(pooled_var)
-    
-    return Stats(total_count, avg, min_val, max_val, median, stddev)
+    if stats1.median >= 0 and stats2.median >= 0:
+        # best effort
+        median = (stats1.median * stats1.count + stats2.median * stats2.count) / total_count
+    else:
+        median = -1
+    sum_of_squares = stats1.sum_of_squares + stats2.sum_of_squares
+    # var = E[X^2] - (E[X])^2
+    var = (sum_of_squares / total_count) - (avg ** 2)
+    stddev = math.sqrt(var) if var > 0 else 0.0
+    batch_count = stats1.batch_count + stats2.batch_count
+
+    return Stats(total_count, avg, min_val, max_val, sum_of_squares, median, stddev, batch_count)
 
 
 def collect_json_lines(input_file) -> List[List[dict]]:
@@ -281,6 +268,9 @@ def process_bpf_metric(name, bpf_data, bpf_data_type) -> Stats:
     max_val = bpf_data[name + "_max"]
     if not isinstance(max_val, int):
         raise ValueError(f"Expected {name}_max to be an int")
+    s2x = bpf_data[name + "_s2x"]
+    if not isinstance(s2x, int):
+        raise ValueError(f"Expected {name}_s2x to be an int")
 
     for bucket in hist:
         if "min" not in bucket:
@@ -301,29 +291,19 @@ def process_bpf_metric(name, bpf_data, bpf_data_type) -> Stats:
             break
         curr_seen += count
 
-    # Find standard deviation from the histogram
-    var = 0.0
-    for bucket in hist:
-        start = bucket["min"]
-        end = bucket["max"]
-        count = bucket["count"]
-        midpoint = (start + end) / 2
-        if end == max_val:
-            # For the purpose of standard deviation, we avoid outliers
-            # massively skewing the result by pretending that most of the
-            # values in this bucket is at the front.
-            midpoint = start
-        var += count * ((midpoint - avg) ** 2)
+    # variance = E[X^2] - (E[X])^2
+    var = (s2x / total) - (avg ** 2)
+    stddev = math.sqrt(var) if var > 0 else 0.0
 
-    var /= total
-    stddev = math.sqrt(var)
     return Stats(
         count=total,
         avg=avg,
         min=min_val,
         max=max_val,
+        sum_of_squares=s2x,
         median=median,
         stddev=stddev,
+        batch_count=1,
     )
 
 
@@ -364,8 +344,10 @@ def parse_test_jsons(test_jsons: List[dict], metrics_ordered: List[str]) -> dict
         avg=cstats["mean"],
         min=cstats["min"],
         max=cstats["max"],
+        sum_of_squares=cstats["sum_of_squares"],
         median=-1,
         stddev=cstats["stddev"],
+        batch_count=1,
     )
 
     return result_metrics
@@ -420,7 +402,7 @@ def main():
         for metric_name in metrics_ordered:
             base_stats = tests[base_variant][test_desc][metric_name]
             print(f"  {base_variant}:")
-            print(f"    {metric_name}: {base_stats.count} samples, "
+            print(f"    {metric_name}: {base_stats.count} samples ({base_stats.batch_count} trials), "
                   f"avg={base_stats.avg:.2f}, min={base_stats.min:.2f}, "
                   f"max={base_stats.max:.2f}, median={base_stats.median:.2f}, "
                   f"stddev={base_stats.stddev:.2f}")
@@ -439,7 +421,7 @@ def main():
                     continue
                 stats = variant_stats[metric_name]
                 base_stats = tests[base_variant][test_desc][metric_name]
-                print(f"    {metric_name}: {stats.count} samples, "
+                print(f"    {metric_name}: {stats.count} samples ({stats.batch_count} trials), "
                       f"avg={stats.avg:.2f}, min={stats.min:.2f}, "
                       f"max={stats.max:.2f}, median={stats.median:.2f}, "
                       f"stddev={stats.stddev:.2f}")

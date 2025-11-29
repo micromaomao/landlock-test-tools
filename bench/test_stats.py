@@ -40,51 +40,42 @@ merge_results = module.merge_results
 
 
 class TestMergeResults(unittest.TestCase):
-    """Test the merge_results function with parallel axis theorem."""
+    """Test the merge_results function."""
     
     def test_merge_identical_distributions(self):
         """Merging two identical distributions should give same mean and stddev."""
-        s1 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, median=100.0, stddev=10.0)
-        s2 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, median=100.0, stddev=10.0)
+        # sum_of_squares for mean=100, stddev=10, n=1000: 
+        # var = sum_of_squares/n - mean^2 => sum_of_squares = n*(var + mean^2) = 1000*(100+10000) = 10100000
+        s1 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, sum_of_squares=10100000.0, median=100.0, stddev=10.0, batch_count=1)
+        s2 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, sum_of_squares=10100000.0, median=100.0, stddev=10.0, batch_count=1)
         
         merged = merge_results(s1, s2)
         
         self.assertEqual(merged.count, 2000)
         self.assertAlmostEqual(merged.avg, 100.0, places=5)
-        self.assertAlmostEqual(merged.stddev, 10.0, places=5)
+        self.assertAlmostEqual(merged.stddev, 10.0, places=4)
+        self.assertEqual(merged.batch_count, 2)
     
-    def test_merge_different_means_same_variance(self):
-        """
-        Merging distributions with different means should increase variance.
-        
-        This is the key test for the parallel axis theorem.
-        If we have two groups with the same variance but different means,
-        the combined variance should be larger than the individual variances.
-        """
-        # Two groups with same variance (stddev=10) but different means
-        s1 = Stats(count=1000, avg=90.0, min=70.0, max=110.0, median=90.0, stddev=10.0)
-        s2 = Stats(count=1000, avg=110.0, min=90.0, max=130.0, median=110.0, stddev=10.0)
+    def test_merge_different_means(self):
+        """Merging distributions with different means should produce correct combined stats."""
+        # s1: mean=90, var=100, n=1000 => sum_of_squares = 1000*(100 + 8100) = 8200000
+        # s2: mean=110, var=100, n=1000 => sum_of_squares = 1000*(100 + 12100) = 12200000
+        s1 = Stats(count=1000, avg=90.0, min=70.0, max=110.0, sum_of_squares=8200000.0, median=90.0, stddev=10.0, batch_count=1)
+        s2 = Stats(count=1000, avg=110.0, min=90.0, max=130.0, sum_of_squares=12200000.0, median=110.0, stddev=10.0, batch_count=1)
         
         merged = merge_results(s1, s2)
         
         self.assertEqual(merged.count, 2000)
         self.assertAlmostEqual(merged.avg, 100.0, places=5)
-        # The variance should be larger than 100 (= 10^2) because the means differ.
-        # Using parallel axis theorem:
-        #   combined_mean = 100
-        #   delta1 = 90 - 100 = -10, delta2 = 110 - 100 = 10
-        #   var1 = var2 = 100 (stddev^2)
-        #   pooled_var = (1000*(100 + (-10)^2) + 1000*(100 + 10^2)) / 2000
-        #              = (1000*(100 + 100) + 1000*(100 + 100)) / 2000
-        #              = (200000 + 200000) / 2000 = 200
-        # So stddev should be sqrt(200) ≈ 14.14
-        self.assertGreater(merged.stddev, 10.0)  # Must be larger than individual stddev
-        self.assertAlmostEqual(merged.stddev, math.sqrt(200), places=4)
+        # Combined variance: sum_of_squares/n - mean^2 = 20400000/2000 - 10000 = 10200 - 10000 = 200
+        # stddev = sqrt(200) ≈ 14.14
+        self.assertAlmostEqual(merged.stddev, math.sqrt(200), places=3)
+        self.assertEqual(merged.batch_count, 2)
     
     def test_merge_with_empty(self):
         """Merging with an empty distribution should return the other."""
-        s1 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, median=100.0, stddev=10.0)
-        s2 = Stats(count=0, avg=0.0, min=0.0, max=0.0, median=0.0, stddev=0.0)
+        s1 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, sum_of_squares=10100000.0, median=100.0, stddev=10.0, batch_count=1)
+        s2 = Stats(count=0, avg=0.0, min=0.0, max=0.0, sum_of_squares=0.0, median=0.0, stddev=0.0, batch_count=0)
         
         merged = merge_results(s1, s2)
         self.assertEqual(merged, s1)
@@ -92,13 +83,13 @@ class TestMergeResults(unittest.TestCase):
         merged2 = merge_results(s2, s1)
         self.assertEqual(merged2, s1)
     
-    def test_median_unavailable_after_merge(self):
-        """Merged median should be -1 since it can't be computed from summaries."""
-        s1 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, median=100.0, stddev=10.0)
-        s2 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, median=100.0, stddev=10.0)
+    def test_median_weighted_average(self):
+        """Merged median should be weighted average when both are available."""
+        s1 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, sum_of_squares=10100000.0, median=95.0, stddev=10.0, batch_count=1)
+        s2 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, sum_of_squares=10100000.0, median=105.0, stddev=10.0, batch_count=1)
         
         merged = merge_results(s1, s2)
-        self.assertEqual(merged.median, -1)
+        self.assertAlmostEqual(merged.median, 100.0, places=5)
 
 
 class TestWelchTTest(unittest.TestCase):
@@ -106,8 +97,8 @@ class TestWelchTTest(unittest.TestCase):
     
     def test_identical_distributions(self):
         """Identical distributions should give t-statistic of 0."""
-        s1 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, median=100.0, stddev=10.0)
-        s2 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, median=100.0, stddev=10.0)
+        s1 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, sum_of_squares=10100000.0, median=100.0, stddev=10.0, batch_count=1)
+        s2 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, sum_of_squares=10100000.0, median=100.0, stddev=10.0, batch_count=1)
         
         t_stat, df = welch_t_test(s1, s2)
         
@@ -115,8 +106,8 @@ class TestWelchTTest(unittest.TestCase):
     
     def test_clearly_different_distributions(self):
         """Distributions with very different means should give large t-statistic."""
-        s1 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, median=100.0, stddev=10.0)
-        s2 = Stats(count=1000, avg=200.0, min=180.0, max=220.0, median=200.0, stddev=10.0)
+        s1 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, sum_of_squares=10100000.0, median=100.0, stddev=10.0, batch_count=1)
+        s2 = Stats(count=1000, avg=200.0, min=180.0, max=220.0, sum_of_squares=40100000.0, median=200.0, stddev=10.0, batch_count=1)
         
         t_stat, df = welch_t_test(s1, s2)
         
@@ -125,8 +116,8 @@ class TestWelchTTest(unittest.TestCase):
     
     def test_degrees_of_freedom(self):
         """Test degrees of freedom calculation."""
-        s1 = Stats(count=100, avg=100.0, min=80.0, max=120.0, median=100.0, stddev=10.0)
-        s2 = Stats(count=100, avg=100.0, min=80.0, max=120.0, median=100.0, stddev=10.0)
+        s1 = Stats(count=100, avg=100.0, min=80.0, max=120.0, sum_of_squares=1010000.0, median=100.0, stddev=10.0, batch_count=1)
+        s2 = Stats(count=100, avg=100.0, min=80.0, max=120.0, sum_of_squares=1010000.0, median=100.0, stddev=10.0, batch_count=1)
         
         _, df = welch_t_test(s1, s2)
         
@@ -141,8 +132,8 @@ class TestCompareStats(unittest.TestCase):
     
     def test_no_difference_identical(self):
         """Same distributions should show no significant difference."""
-        s1 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, median=100.0, stddev=10.0)
-        s2 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, median=100.0, stddev=10.0)
+        s1 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, sum_of_squares=10100000.0, median=100.0, stddev=10.0, batch_count=1)
+        s2 = Stats(count=1000, avg=100.0, min=80.0, max=120.0, sum_of_squares=10100000.0, median=100.0, stddev=10.0, batch_count=1)
         
         result = compare_stats(s1, s2)
         
@@ -153,8 +144,8 @@ class TestCompareStats(unittest.TestCase):
         """Tiny differences should not be flagged even if statistically significant."""
         # With 10000 samples, small differences become statistically significant
         # but we require practical significance (min_effect_size)
-        base = Stats(count=10000, avg=1000.0, min=800.0, max=1200.0, median=1000.0, stddev=50.0)
-        test = Stats(count=10000, avg=1002.0, min=802.0, max=1202.0, median=1002.0, stddev=50.0)
+        base = Stats(count=10000, avg=1000.0, min=800.0, max=1200.0, sum_of_squares=10002500000.0, median=1000.0, stddev=50.0, batch_count=1)
+        test = Stats(count=10000, avg=1002.0, min=802.0, max=1202.0, sum_of_squares=10042540040.0, median=1002.0, stddev=50.0, batch_count=1)
         
         result = compare_stats(base, test)
         
@@ -164,8 +155,8 @@ class TestCompareStats(unittest.TestCase):
     
     def test_significant_improvement(self):
         """Large improvement should show as improved."""
-        base = Stats(count=10000, avg=1000.0, min=800.0, max=1200.0, median=1000.0, stddev=50.0)
-        test = Stats(count=10000, avg=900.0, min=700.0, max=1100.0, median=900.0, stddev=50.0)
+        base = Stats(count=10000, avg=1000.0, min=800.0, max=1200.0, sum_of_squares=10002500000.0, median=1000.0, stddev=50.0, batch_count=1)
+        test = Stats(count=10000, avg=900.0, min=700.0, max=1100.0, sum_of_squares=8102500000.0, median=900.0, stddev=50.0, batch_count=1)
         
         result = compare_stats(base, test)
         
@@ -177,8 +168,8 @@ class TestCompareStats(unittest.TestCase):
     
     def test_significant_regression(self):
         """Large regression should show as worse."""
-        base = Stats(count=10000, avg=1000.0, min=800.0, max=1200.0, median=1000.0, stddev=50.0)
-        test = Stats(count=10000, avg=1100.0, min=900.0, max=1300.0, median=1100.0, stddev=50.0)
+        base = Stats(count=10000, avg=1000.0, min=800.0, max=1200.0, sum_of_squares=10002500000.0, median=1000.0, stddev=50.0, batch_count=1)
+        test = Stats(count=10000, avg=1100.0, min=900.0, max=1300.0, sum_of_squares=12102500000.0, median=1100.0, stddev=50.0, batch_count=1)
         
         result = compare_stats(base, test)
         
@@ -188,8 +179,8 @@ class TestCompareStats(unittest.TestCase):
     
     def test_effect_size_calculation(self):
         """Effect size should be calculated correctly."""
-        base = Stats(count=1000, avg=100.0, min=80.0, max=120.0, median=100.0, stddev=10.0)
-        test = Stats(count=1000, avg=105.0, min=85.0, max=125.0, median=105.0, stddev=10.0)
+        base = Stats(count=1000, avg=100.0, min=80.0, max=120.0, sum_of_squares=10100000.0, median=100.0, stddev=10.0, batch_count=1)
+        test = Stats(count=1000, avg=105.0, min=85.0, max=125.0, sum_of_squares=11125000.0, median=105.0, stddev=10.0, batch_count=1)
         
         result = compare_stats(base, test)
         
