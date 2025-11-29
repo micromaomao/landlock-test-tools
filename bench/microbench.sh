@@ -201,10 +201,10 @@ run_test() {
 }
 
 for trial in $(seq 1 $NB_TRIALS); do
-	for depth in 0 1 5 10 20 29; do
+	for depth in 0 5 10 29; do
 		print_verbose "Running trial $trial for no Landlock"
 		run_test 0 $depth 0
-		for nb_extra_rules in 0 1 5 10 30 50 100 150 200; do
+		for nb_extra_rules in 0 10 100 1000; do
 			print_verbose "Running trial $trial for depth $depth with $nb_extra_rules extra rules"
 			run_test 1 $depth $nb_extra_rules
 		done
