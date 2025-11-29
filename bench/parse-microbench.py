@@ -156,6 +156,9 @@ def merge_results(stats1: Stats, stats2: Stats) -> Stats:
     Uses the correct pooled variance formula that accounts for differences
     in means between the two samples:
     var_combined = [n1*(var1 + (mean1 - combined_mean)^2) + n2*(var2 + (mean2 - combined_mean)^2)] / (n1 + n2)
+    
+    Note: Median cannot be correctly computed from summary statistics alone,
+    so we mark it as unavailable (-1) when merging.
     """
     if stats1.count == 0:
         return stats2
@@ -166,10 +169,9 @@ def merge_results(stats1: Stats, stats2: Stats) -> Stats:
     avg = (stats1.avg * n1 + stats2.avg * n2) / total_count
     min_val = min(stats1.min, stats2.min)
     max_val = max(stats1.max, stats2.max)
-    if stats1.median >= 0 and stats2.median >= 0:
-        median = (stats1.median * n1 + stats2.median * n2) / total_count
-    else:
-        median = -1
+    # Median cannot be correctly computed from summary statistics alone
+    # without access to the original data, so we mark it as unavailable
+    median = -1
     # Correct pooled variance formula that accounts for differences in means
     var1 = stats1.stddev ** 2
     var2 = stats2.stddev ** 2
