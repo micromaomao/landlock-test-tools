@@ -12,21 +12,16 @@ This verifies correctness of:
 import math
 import sys
 import unittest
-
-# Import from the main module
-sys.path.insert(0, '.')
-from importlib.util import spec_from_loader, module_from_spec
+import importlib.util
 
 # We need to avoid running main() when importing
-import importlib.util
-spec = importlib.util.spec_from_file_location("parse_microbench", "parse-microbench.py")
-module = importlib.util.module_from_spec(spec)
-
-# Execute the module but it will call main() and exit with error if no args
-# We need to patch sys.argv to avoid this
-import sys
+# Patch sys.argv to prevent main() from failing
 original_argv = sys.argv
 sys.argv = ['parse-microbench.py', '/dev/null']  # dummy argument
+
+# Import the module
+spec = importlib.util.spec_from_file_location("parse_microbench", "parse-microbench.py")
+module = importlib.util.module_from_spec(spec)
 
 try:
     spec.loader.exec_module(module)
@@ -74,8 +69,14 @@ class TestMergeResults(unittest.TestCase):
         
         self.assertEqual(merged.count, 2000)
         self.assertAlmostEqual(merged.avg, 100.0, places=5)
-        # The variance should be larger than 100 (= 10^2) because the means differ
-        # Expected: var = (1000*(100 + 100) + 1000*(100 + 100)) / 2000 = 200
+        # The variance should be larger than 100 (= 10^2) because the means differ.
+        # Using parallel axis theorem:
+        #   combined_mean = 100
+        #   delta1 = 90 - 100 = -10, delta2 = 110 - 100 = 10
+        #   var1 = var2 = 100 (stddev^2)
+        #   pooled_var = (1000*(100 + (-10)^2) + 1000*(100 + 10^2)) / 2000
+        #              = (1000*(100 + 100) + 1000*(100 + 100)) / 2000
+        #              = (200000 + 200000) / 2000 = 200
         # So stddev should be sqrt(200) ≈ 14.14
         self.assertGreater(merged.stddev, 10.0)  # Must be larger than individual stddev
         self.assertAlmostEqual(merged.stddev, math.sqrt(200), places=4)

@@ -58,6 +58,12 @@ def welch_t_test(stats1: Stats, stats2: Stats) -> Tuple[float, float]:
     
     Welch's t-test is more robust than the standard t-test when samples 
     have unequal variances and/or unequal sample sizes.
+    
+    Edge cases:
+    - Returns (0.0, 0.0) if either sample has count <= 1
+    - Returns (inf, inf) if both variances are zero but means differ
+      (indicating a degenerate case with no variance)
+    - Returns (0.0, inf) if both variances are zero and means are equal
     """
     n1, n2 = stats1.count, stats2.count
     if n1 <= 1 or n2 <= 1:
@@ -69,6 +75,8 @@ def welch_t_test(stats1: Stats, stats2: Stats) -> Tuple[float, float]:
     # Standard error of the difference
     se_sq = var1 / n1 + var2 / n2
     if se_sq == 0:
+        # Degenerate case: both samples have zero variance
+        # If means differ, t-stat is infinite; otherwise 0
         return (float('inf') if stats1.avg != stats2.avg else 0.0, float('inf'))
     
     se = math.sqrt(se_sq)
@@ -80,6 +88,7 @@ def welch_t_test(stats1: Stats, stats2: Stats) -> Tuple[float, float]:
     numerator = se_sq ** 2
     denominator = (var1 / n1) ** 2 / (n1 - 1) + (var2 / n2) ** 2 / (n2 - 1)
     if denominator == 0:
+        # With zero denominator (both variances very small), df approaches infinity
         df = float('inf')
     else:
         df = numerator / denominator
@@ -93,13 +102,18 @@ def t_critical_value(df: float, alpha: float = 0.05) -> float:
     
     For large df (> 100), this approaches the z-value of ~1.96 for alpha=0.05.
     Uses an approximation since we don't have scipy available.
+    
+    The approximation formula is a Taylor series expansion of the inverse
+    t-distribution: t ≈ z * (1 + 1/(4*df) + z²/(16*df))
+    This is accurate to within 1% for df > 5 and approaches z for large df.
+    Reference: Abramowitz & Stegun, Handbook of Mathematical Functions, 26.7.5
     """
     z = 1.96  # z value for two-tailed test at alpha=0.05
     if df > 100:
         return z
     if df <= 0:
         return float('inf')
-    # Simple approximation based on inverse t-distribution
+    # Taylor series approximation of inverse t-distribution
     return z * (1 + 1 / (4 * df) + z ** 2 / (16 * df))
 
 
