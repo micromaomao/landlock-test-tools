@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0
+#
+# Parse JSON outputs from microbench.sh and bpftrace, computing statistics
+# (mean, median, standard deviation, confidence intervals) for each benchmark
+# configuration. When multiple input files are provided, compares the results
+# across different variants to identify performance differences.
+#
+# Usage: ./parse-microbench.py <log1.json> [log2.json ...]
+#
+# Copyright © 2025 Tingmao Wang <m@maowtm.org>
 
 import os
 import re

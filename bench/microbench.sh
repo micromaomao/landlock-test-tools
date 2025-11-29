@@ -27,7 +27,7 @@ PERF_TRACE_OPENAT=0
 print_usage() {
 	echo "Usage: ${BASENAME} [--cpu <cpu_number>] [--bpftrace] [--ssh <host>]"
 	echo "  --cpu <cpu_number>   Run the benchmark on the specified CPU core."
-	echo "                       (default: all CPUs if not using bpftrace, or 0)"
+	echo "                       (default: 0)"
 	echo "  --bpftrace           Use bpftrace to measure Landlock overhead."
 	echo "  --ssh <host>         Use SSH to run the benchmark on the specified host."
 	echo "  --verbose            Enable verbose output."
@@ -90,7 +90,7 @@ print_verbose() {
 	fi
 }
 
-if [[ -z "$RUN_ON_CPU" && $DO_BPFTRACE -eq 1 ]]; then
+if [[ -z "$RUN_ON_CPU" ]]; then
 	RUN_ON_CPU=0
 fi
 
@@ -154,10 +154,6 @@ run_test() {
 	local do_landlock="$1"
 	local dir_depth="$2"
 	local nb_extra_rules="$3"
-	local maybe_taskset=()
-	if [[ -n "${RUN_ON_CPU}" ]]; then
-		maybe_taskset=(taskset -c "${RUN_ON_CPU}")
-	fi
 	local maybe_sandboxer=()
 	if [[ $do_landlock -eq 1 ]]; then
 		maybe_sandboxer=("./sandboxer")
@@ -171,11 +167,7 @@ run_test() {
 	local expected_errno=0
 	local maybe_perf=()
 	if [[ $PERF_TRACE_OPENAT -eq 1 ]]; then
-		maybe_perf=(perf trace)
-		if [[ -n "${RUN_ON_CPU}" ]]; then
-			maybe_perf+=( -C "${RUN_ON_CPU}" )
-		fi
-		maybe_perf+=(-s -e openat --)
+		maybe_perf=(perf trace -C "${RUN_ON_CPU}" -s -e openat --)
 	fi
 	local maybe_ssh=()
 	if [[ -n "${SSH_HOST}" ]]; then
@@ -184,7 +176,7 @@ run_test() {
 	local cmd=(
 		"${maybe_ssh[@]}"
 		env LL_FS_RO="$LL_FS_RO" LL_FS_RW="$LL_FS_RW" IN_BENCHMARK_NS=1 VERBOSE=$VERBOSE unshare --mount --
-		./run-bench-in-namespace.sh "${maybe_perf[@]}" "${maybe_sandboxer[@]}" "${maybe_taskset[@]}"
+		./run-bench-in-namespace.sh "${maybe_perf[@]}" taskset -c "${RUN_ON_CPU}" "${maybe_sandboxer[@]}"
 		./open-ntimes "$NUM_ITERATIONS" "$expected_errno" "$d"
 	)
 
