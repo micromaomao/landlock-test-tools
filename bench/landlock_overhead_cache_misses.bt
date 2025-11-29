@@ -9,7 +9,7 @@
  * This is a work in progress - not sure if it actually measures the right thing.
  *
  * I wish bpftrace had a way to directly read the perf counters... (i.e. find
- * difference before and after landlock hook)
+ * difference before and after Landlock hook)
  */
 #define TARGET_CPU $1
 
@@ -69,11 +69,11 @@ t:syscalls:sys_exit_open, t:syscalls:sys_exit_openat, t:syscalls:sys_exit_openat
 END {
 	for ($kv : @nb_not_landlocked_opens) {
 		if ($kv.1 > 10) {
-			printf("WARN: %s had %d opens that did not call landlock hook\n", $kv.0, (int32)$kv.1);
+			printf("WARNING: %s had %d opens that did not call Landlock hook\n", $kv.0, (int32)$kv.1);
 		}
 	}
 
-	printf("=> landlock hook took average %d ns (%d ns min, %d ns max)\n", (int32)@latency_landlock_hook_avg, (int32)@latency_landlock_hook_min, (int32)@latency_landlock_hook_max);
+	printf("=> Landlock hook took average %d ns (%d ns min, %d ns max)\n", (int32)@latency_landlock_hook_avg, (int32)@latency_landlock_hook_min, (int32)@latency_landlock_hook_max);
 	clear(@latency_landlock_hook_avg);
 	clear(@latency_landlock_hook_min);
 	clear(@latency_landlock_hook_max);
@@ -81,7 +81,7 @@ END {
 	clear(@latency_open_syscall_avg);
 	clear(@latency_open_syscall_min);
 	clear(@latency_open_syscall_max);
-	printf("=> landlock hook overhead (percent) average is %d (%d min, %d max)\n", (int32)@landlock_hook_overhead_avg, (int32)@landlock_hook_overhead_min, (int32)@landlock_hook_overhead_max);
+	printf("=> Landlock hook overhead (percent) average is %d (%d min, %d max)\n", (int32)@landlock_hook_overhead_avg, (int32)@landlock_hook_overhead_min, (int32)@landlock_hook_overhead_max);
 	clear(@landlock_hook_overhead_avg);
 	clear(@landlock_hook_overhead_min);
 	clear(@landlock_hook_overhead_max);
