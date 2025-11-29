@@ -139,13 +139,12 @@ static void check_outlier_warning(const struct outlier_detection *od)
 	outlier_percent =
 		(double)od->outlier_count / od->samples_after_init * 100.0;
 	if (outlier_percent > OUTLIER_THRESHOLD_PERCENT) {
-		fprintf(stderr,
-			"[*] WARNING: %.1f%% of samples (%lu/%lu) are outliers "
-			"(outside 99.9%% interval ( %.2f +/- %.2f ))\n",
-			outlier_percent, od->outlier_count,
-			od->samples_after_init,
-			(od->interval_low + od->interval_high) / 2.0,
-			(od->interval_high - od->interval_low) / 2.0);
+		printf("[*] WARNING: %.1f%% of samples (%lu/%lu) are outliers "
+		       "(outside 99.9%% interval ( %.2f +/- %.2f ))\n",
+		       outlier_percent, od->outlier_count,
+		       od->samples_after_init,
+		       (od->interval_low + od->interval_high) / 2.0,
+		       (od->interval_high - od->interval_low) / 2.0);
 	}
 }
 
