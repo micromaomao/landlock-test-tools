@@ -131,7 +131,7 @@ class ComparisonResult:
 
 
 def compare_stats(base: Stats, test: Stats, alpha: float = 0.05,
-                  min_effect_size: float = 0.1) -> ComparisonResult:
+                  min_effect_size: float = 0.2) -> ComparisonResult:
     """
     Compare two samples using Welch's t-test with practical significance filter.
     
@@ -147,7 +147,7 @@ def compare_stats(base: Stats, test: Stats, alpha: float = 0.05,
         test: Statistics for the test measurement
         alpha: Significance level (default 0.05 for 95% confidence)
         min_effect_size: Minimum Cohen's d to consider practically significant
-                         (default 0.1, which is a "small" effect)
+                         (default 0.2, which is Cohen's "small" effect threshold)
     
     Returns:
         ComparisonResult with statistical comparison details

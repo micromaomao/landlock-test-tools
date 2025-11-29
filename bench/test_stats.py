@@ -149,9 +149,9 @@ class TestCompareStats(unittest.TestCase):
         
         result = compare_stats(base, test)
         
-        # Effect size is (1000 - 1002) / 50 = -0.04, which is below threshold
+        # Effect size is (1000 - 1002) / 50 = -0.04, which is below threshold (0.2)
         self.assertFalse(result.is_different)
-        self.assertLess(abs(result.effect_size), 0.1)
+        self.assertLess(abs(result.effect_size), 0.2)
     
     def test_significant_improvement(self):
         """Large improvement should show as improved."""
