@@ -12,7 +12,7 @@
 set -e -u -o pipefail
 
 if [[ $# -lt 2 ]]; then
-	echo "usage: ${BASH_SOURCE[0]} <linux-x86-kernel> [VAR=value]... -- <exec-path> [exec-arg]..." >&2
+	echo "usage: ${BASH_SOURCE[0]} <linux-x86-kernel> [<coverage-dir>] -- <exec-path> [exec-arg]..." >&2
 	exit 1
 fi
 
@@ -21,8 +21,12 @@ BASE_DIR="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 KERNEL="$1"
 shift
 
-COVERAGE_DIR="$1"
-shift
+if [[ "${1:-}" != "" && "${1:-}" != "--" ]]; then
+	COVERAGE_DIR="$1"
+	shift
+else
+	COVERAGE_DIR=""
+fi
 
 if [[ "${1:-}" != "--" ]] then
 	echo "ERROR: Missing '--' argument" >&2
