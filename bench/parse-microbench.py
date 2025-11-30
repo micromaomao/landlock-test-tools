@@ -70,7 +70,7 @@ def collect_json_lines(input_file) -> List[List[dict]]:
     return tests
 
 
-@dataclass(eq=True, frozen=True)
+@dataclass(eq=True)
 class Stats:
     count: int
     avg: float
@@ -80,6 +80,7 @@ class Stats:
     median: float
     stddev: float
     batch_count: int
+    histogram: List[dict] = None
 
     def p95_confidence(self) -> Tuple[float, float]:
         # Assuming a normal distribution, 95% confidence interval is approximately
@@ -89,6 +90,22 @@ class Stats:
             return 0.0
         diff = 1.96 * (self.stddev / (self.count ** 0.5))
         return (self.avg - diff, self.avg + diff)
+
+    def median_from_histogram(self) -> float:
+        if not self.histogram:
+            return -1
+        median_pos = self.count // 2
+        curr_seen = 0
+        median = None
+        for bucket in self.histogram:
+            start = bucket["min"]
+            end = bucket["max"]
+            count = bucket["count"]
+            if curr_seen <= median_pos < curr_seen + count:
+                median = start + (median_pos - curr_seen) / count * (end - start)
+                break
+            curr_seen += count
+        return median
 
 def process_bpf_metric(name, bpf_data, bpf_data_type) -> Stats:
     if bpf_data_type[name] != "hist":
@@ -114,33 +131,23 @@ def process_bpf_metric(name, bpf_data, bpf_data_type) -> Stats:
         if "max" not in bucket:
             bucket["max"] = max_val
 
-    # Find median from the histogram
-    median_pos = total // 2
-    curr_seen = 0
-    median = None
-    for bucket in hist:
-        start = bucket["min"]
-        end = bucket["max"]
-        count = bucket["count"]
-        if curr_seen <= median_pos < curr_seen + count:
-            median = start + (median_pos - curr_seen) / count * (end - start)
-            break
-        curr_seen += count
-
     # variance = E[X^2] - (E[X])^2
     var = (s2x / total) - (avg ** 2)
     stddev = var ** 0.5
 
-    return Stats(
+    s = Stats(
         count=total,
         avg=avg,
         min=min_val,
         max=max_val,
         sum_of_squares=s2x,
-        median=median,
+        median=-1,
         stddev=stddev,
         batch_count=1,
+        histogram=hist,
     )
+    s.median = s.median_from_histogram()
+    return s
 
 metrics_ordered = ["c_measured_syscall_time_ns"]
 
@@ -178,6 +185,7 @@ def parse_test_jsons(test_jsons: List[dict]) -> dict:
         median=-1,
         stddev=cstats["stddev"],
         batch_count=1,
+        histogram=None,
     )
 
     return result_metrics
@@ -191,6 +199,101 @@ class TestDescription:
 
 test_descs_ordered = []
 
+def merge_bpf_histograms(hist1: List[dict], hist2: List[dict]) -> List[dict]:
+    # Assume both histograms have the same bucket ranges, except they might
+    # start or end from different points.
+    #
+    # Both min and max are inclusive.
+    merged = []
+    i, j = 0, 0
+    while i < len(hist1) and j < len(hist2):
+        b1 = hist1[i]
+        b2 = hist2[j]
+        if b1["max"] < b2["min"]:
+            merged.append(b1)
+            i += 1
+        elif b2["max"] < b1["min"]:
+            merged.append(b2)
+            j += 1
+        else:
+            # Overlapping buckets
+            new_bucket = {
+                "min": min(b1["min"], b2["min"]),
+                "max": max(b1["max"], b2["max"]),
+                "count": b1["count"] + b2["count"],
+            }
+            merged.append(new_bucket)
+            i += 1
+            j += 1
+    while i < len(hist1):
+        merged.append(hist1[i])
+        i += 1
+    while j < len(hist2):
+        merged.append(hist2[j])
+        j += 1
+    return merged
+
+def print_histograms_side_by_side(hist1: List[dict], hist2: List[dict], indent: int) -> None:
+    i, j = 0, 0
+
+    max_count = max(
+        bucket["count"] for bucket in hist1 + hist2
+    )
+
+    max_max_digits = max(
+        len(str(bucket["max"])) for bucket in hist1 + hist2
+    )
+    max_min_digits = max(
+        len(str(bucket["min"])) for bucket in hist1 + hist2
+    )
+
+    count_thres = max(1, max_count // 40)
+
+    def format_bucket(bucket: dict) -> str:
+        nb_of_stars = int((bucket["count"] / max_count) * 40)
+        stars = "#" * nb_of_stars
+        return f"[{bucket['min']:>{max_min_digits}} .. {bucket['max']:>{max_max_digits}}]: {stars:<40}"
+
+    placeholder = ' ' * len(format_bucket({"min":0,"max":0,"count":max_count}))
+
+    while hist1 and hist2 and hist1[i]["count"] < count_thres and hist2[j]["count"] < count_thres:
+        i += 1
+        j += 1
+
+    trimed_end = False
+    while hist1 and hist2 and hist1[-1]["count"] < count_thres and hist2[-1]["count"] < count_thres:
+        hist1.pop()
+        hist2.pop()
+        trimed_end = True
+
+    if i > 0 and j > 0:
+        print(f"{' ' * indent}   ...")
+
+    while i < len(hist1) and j < len(hist2):
+        b1 = hist1[i]
+        b2 = hist2[j]
+        if b1["max"] < b2["min"]:
+            print(f"{' ' * indent}{format_bucket(b1)}    {placeholder}")
+            i += 1
+        elif b2["max"] < b1["min"]:
+            print(f"{' ' * indent}{placeholder}    {format_bucket(b2)}")
+            j += 1
+        else:
+            print(f"{' ' * indent}{format_bucket(b1)}    {format_bucket(b2)}")
+            i += 1
+            j += 1
+    while i < len(hist1):
+        b1 = hist1[i]
+        print(f"{' ' * indent}{format_bucket(b1)}    {placeholder}")
+        i += 1
+    while j < len(hist2):
+        b2 = hist2[j]
+        print(f"{' ' * indent}{placeholder}    {format_bucket(b2)}")
+        j += 1
+
+    if trimed_end:
+        print(f"{' ' * indent}   ...")
+
 def merge_results(stats1: Stats, stats2: Stats) -> Stats:
     if stats1.count == 0:
         return stats2
@@ -200,18 +303,17 @@ def merge_results(stats1: Stats, stats2: Stats) -> Stats:
     avg = (stats1.avg * stats1.count + stats2.avg * stats2.count) / total_count
     min_val = min(stats1.min, stats2.min)
     max_val = max(stats1.max, stats2.max)
-    if stats1.median >= 0 and stats2.median >= 0:
-        # best effort
-        median = (stats1.median * stats1.count + stats2.median * stats2.count) / total_count
-    else:
-        median = -1
     sum_of_squares = stats1.sum_of_squares + stats2.sum_of_squares
     # var = E[X^2] - (E[X])^2
     var = (sum_of_squares / total_count) - (avg ** 2)
     stddev = var ** 0.5
     batch_count = stats1.batch_count + stats2.batch_count
 
-    return Stats(total_count, avg, min_val, max_val, sum_of_squares, median, stddev, batch_count)
+    s = Stats(total_count, avg, min_val, max_val, sum_of_squares, -1, stddev, batch_count, None)
+    if stats1.histogram and stats2.histogram:
+        s.histogram = merge_bpf_histograms(stats1.histogram, stats2.histogram)
+        s.median = s.median_from_histogram()
+    return s
 
 for input_file in inputs:
     with open(input_file, "rt") as f:
@@ -249,38 +351,45 @@ def confidence_interval_is_different(
 
 for test_desc in test_descs_ordered:
     print(f"{test_desc}")
+    base_stats = tests[base_variant][test_desc]
+    print(f"  {base_variant}:")
     for metric_name in metrics_ordered:
-        base_stats = tests[base_variant][test_desc][metric_name]
-        print(f"  {base_variant}:")
-        print(f"    {metric_name}: {base_stats.count} samples ({base_stats.batch_count} trials), "
-              f"avg={base_stats.avg:.2f}, min={base_stats.min:.2f}, "
-              f"max={base_stats.max:.2f}, median={base_stats.median:.2f}, "
-              f"stddev={base_stats.stddev:.2f}")
-        base_low, base_high = base_stats.p95_confidence()
+        base_stat = base_stats[metric_name]
+        print(f"    {metric_name}: {base_stat.count} samples ({base_stat.batch_count} trials), "
+              f"avg={base_stat.avg:.2f}, min={base_stat.min:.2f}, "
+              f"max={base_stat.max:.2f}, median={base_stat.median:.2f}, "
+              f"stddev={base_stat.stddev:.2f}")
+        base_low, base_high = base_stat.p95_confidence()
         print(f"    95% confidence interval: [{base_low:.2f} .. {base_high:.2f}]")
 
     for variant in test_variants:
         if test_desc not in tests[variant]:
             print(f"  {variant}: no data")
             continue
+        base_stats = tests[base_variant][test_desc]
         variant_stats = tests[variant][test_desc]
         print(f"  {variant}:")
         for metric_name in metrics_ordered:
             if metric_name not in variant_stats:
                 print(f"    {metric_name}: no data")
                 continue
-            stats = variant_stats[metric_name]
-            print(f"    {metric_name}: {stats.count} samples ({stats.batch_count} trials), "
-                  f"avg={stats.avg:.2f}, min={stats.min:.2f}, "
-                  f"max={stats.max:.2f}, median={stats.median:.2f}, "
-                  f"stddev={stats.stddev:.2f}")
-            test_low, test_high = stats.p95_confidence()
+            base_stat = base_stats[metric_name]
+            base_low, base_high = base_stat.p95_confidence()
+            stat = variant_stats[metric_name]
+            print(f"    {metric_name}: {stat.count} samples ({stat.batch_count} trials), "
+                  f"avg={stat.avg:.2f}, min={stat.min:.2f}, "
+                  f"max={stat.max:.2f}, median={stat.median:.2f}, "
+                  f"stddev={stat.stddev:.2f}")
+            test_low, test_high = stat.p95_confidence()
             print(f"    95% confidence interval: [{test_low:.2f} .. {test_high:.2f}]")
             if test_high < base_low:
-                change = (base_stats.avg - stats.avg) / base_stats.avg * 100
+                change = (base_stat.avg - stat.avg) / base_stat.avg * 100
                 print(f"    ** Improved {change:.1f}% **")
             elif test_low > base_high:
-                change = (stats.avg - base_stats.avg) / base_stats.avg * 100
+                change = (stat.avg - base_stat.avg) / base_stat.avg * 100
                 print(f"    ** Worsened {change:.1f}% **")
             else:
                 print("    (No significant difference)")
+            if base_stat.histogram and stat.histogram:
+                print_histograms_side_by_side(base_stat.histogram, stat.histogram, indent=6)
+        print("")
