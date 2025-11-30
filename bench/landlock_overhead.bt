@@ -38,12 +38,12 @@ t:syscalls:sys_exit_open, t:syscalls:sys_exit_openat, t:syscalls:sys_exit_openat
 	$duration_open_syscall = nsecs - @open_syscall_start_time[tid];
 	$duration_hook_file_open = @hook_open_duration[tid];
 
-	@latency_landlock_hook = lhist($duration_hook_file_open, 0, 4000, 50);
+	@latency_landlock_hook = lhist($duration_hook_file_open, 0, 700, 15);
 	@latency_landlock_hook_min = min($duration_hook_file_open);
 	@latency_landlock_hook_max = max($duration_hook_file_open);
 	@latency_landlock_hook_avg = avg($duration_hook_file_open);
 	@latency_landlock_hook_s2x = sum($duration_hook_file_open*$duration_hook_file_open);
-	@latency_open_syscall = lhist($duration_open_syscall, 1000, 10000, 100);
+	@latency_open_syscall = lhist($duration_open_syscall, 100, 2000, 100);
 	@latency_open_syscall_min = min($duration_open_syscall);
 	@latency_open_syscall_max = max($duration_open_syscall);
 	@latency_open_syscall_avg = avg($duration_open_syscall);
