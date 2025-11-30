@@ -11,7 +11,7 @@
 
 set -e -u -o pipefail
 
-NUM_ITERATIONS="500000"
+NUM_ITERATIONS="5000000"
 
 DIRNAME="$(dirname -- "${BASH_SOURCE[0]}")"
 BASENAME="$(basename -- "${BASH_SOURCE[0]}")"
@@ -20,7 +20,7 @@ RUN_ON_CPU=""
 DO_BPFTRACE=0
 SSH_HOST=""
 VERBOSE=0
-NB_TRIALS=5
+NB_TRIALS=3
 PERF_TRACE_OPENAT=0
 
 print_usage() {
@@ -190,6 +190,7 @@ run_test() {
 		print_verbose "Running command: ${bpftrace_cmd[*]}"
 		"${maybe_ssh[@]}" "${bpftrace_cmd[@]}" &
 		bpftrace_pid=$!
+		sleep 1
 	fi
 
 	"${cmd[@]}"
@@ -200,13 +201,30 @@ run_test() {
 	fi
 }
 
+DEPTHS_ARR=(0 10 29)
+NB_EXTRA_RULES_ARR=(0 10 1000)
+
+curr_count=0
+total=$((NB_TRIALS * ${#DEPTHS_ARR[@]} * (1 + ${#NB_EXTRA_RULES_ARR[@]})))
+
+print_progress() {
+	local percent=$((curr_count * 100 / total))
+	local msg="$1"
+	if [[ $percent -lt 10 ]]; then
+		percent=" $percent"
+	fi
+	echo "[ ${percent}%] $msg" >&2
+}
+
 for trial in $(seq 1 $NB_TRIALS); do
-	for depth in 0 5 10 29; do
-		print_verbose "Running trial $trial for no Landlock"
+	for depth in "${DEPTHS_ARR[@]}"; do
+		print_progress "Running trial $trial for no Landlock"
 		run_test 0 $depth 0
-		for nb_extra_rules in 0 10 100 1000; do
-			print_verbose "Running trial $trial for depth $depth with $nb_extra_rules extra rules"
+		curr_count=$((curr_count + 1))
+		for nb_extra_rules in "${NB_EXTRA_RULES_ARR[@]}"; do
+			print_progress "Running trial $trial for depth $depth with $nb_extra_rules extra rules"
 			run_test 1 $depth $nb_extra_rules
+			curr_count=$((curr_count + 1))
 		done
 	done
 done
