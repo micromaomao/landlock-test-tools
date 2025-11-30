@@ -161,6 +161,12 @@ def parse_test_jsons(test_jsons: List[dict]) -> dict:
 
     result_metrics = {}
 
+    # Parse chist (C histogram) if present
+    chist_lines = [l for l in test_jsons if l["type"] == "chist"]
+    c_histogram = None
+    if chist_lines:
+        c_histogram = chist_lines[0]["buckets"]
+
     for obj in test_jsons:
         if obj["type"] in ["hist", "map", "stats"]:
             d = obj["data"]
@@ -176,7 +182,7 @@ def parse_test_jsons(test_jsons: List[dict]) -> dict:
             if metric_name not in metrics_ordered:
                 metrics_ordered.append(metric_name)
 
-    result_metrics["c_measured_syscall_time_ns"] = Stats(
+    c_stats = Stats(
         count=cstats["ntimes"],
         avg=cstats["mean"],
         min=cstats["min"],
@@ -185,8 +191,11 @@ def parse_test_jsons(test_jsons: List[dict]) -> dict:
         median=-1,
         stddev=cstats["stddev"],
         batch_count=1,
-        histogram=None,
+        histogram=c_histogram,
     )
+    if c_histogram:
+        c_stats.median = c_stats.median_from_histogram()
+    result_metrics["c_measured_syscall_time_ns"] = c_stats
 
     return result_metrics
 
@@ -234,6 +243,9 @@ def merge_bpf_histograms(hist1: List[dict], hist2: List[dict]) -> List[dict]:
     return merged
 
 def print_histograms_side_by_side(hist1: List[dict], hist2: List[dict], indent: int) -> None:
+    # Make copies to avoid modifying the original lists
+    hist1 = list(hist1)
+    hist2 = list(hist2)
     i, j = 0, 0
 
     max_count = max(
@@ -241,17 +253,22 @@ def print_histograms_side_by_side(hist1: List[dict], hist2: List[dict], indent: 
     )
     count_thres = max(1, max_count // 40)
 
-    while hist1 and hist1[i]["count"] < count_thres:
+    while hist1 and i < len(hist1) and hist1[i]["count"] < count_thres:
         i += 1
-    while hist2 and hist2[j]["count"] < count_thres:
+    while hist2 and j < len(hist2) and hist2[j]["count"] < count_thres:
         j += 1
 
+    trimed_end_1 = False
+    trimed_end_2 = False
     while hist1 and hist1[-1]["count"] < count_thres:
         hist1.pop()
         trimed_end_1 = True
     while hist2 and hist2[-1]["count"] < count_thres:
         hist2.pop()
         trimed_end_2 = True
+
+    if not hist1[i:] or not hist2[j:]:
+        return
 
     max_max_digits = max(
         len(str(bucket["max"])) for bucket in hist1[i:] + hist2[j:]
@@ -350,6 +367,19 @@ def confidence_interval_is_different(
 ) -> bool:
     return base_low > test_high or test_low > base_high
 
+def get_no_landlock_baseline(variant_tests: dict, dir_depth: int) -> Stats:
+    """Find the no-landlock baseline test for a given dir_depth."""
+    baseline_desc = TestDescription(landlock=False, dir_depth=dir_depth, nb_extra_rules=0)
+    if baseline_desc in variant_tests and "c_measured_syscall_time_ns" in variant_tests[baseline_desc]:
+        return variant_tests[baseline_desc]["c_measured_syscall_time_ns"]
+    return None
+
+def estimate_landlock_overhead(landlock_stat: Stats, no_landlock_stat: Stats) -> float:
+    """Estimate landlock overhead as percentage difference between averages."""
+    if no_landlock_stat is None or no_landlock_stat.avg == 0:
+        return None
+    return ((landlock_stat.avg - no_landlock_stat.avg) / no_landlock_stat.avg) * 100
+
 for test_desc in test_descs_ordered:
     print(f"{test_desc}")
     base_stats = tests[base_variant][test_desc]
@@ -365,6 +395,22 @@ for test_desc in test_descs_ordered:
               f"stddev={base_stat.stddev:.2f}")
         base_low, base_high = base_stat.p95_confidence()
         print(f"    95% confidence interval: [{base_low:.2f} .. {base_high:.2f}]")
+
+    # Estimate landlock overhead for non-bpf runs (when landlock=True)
+    if test_desc.landlock:
+        no_landlock_baseline = get_no_landlock_baseline(tests[base_variant], test_desc.dir_depth)
+        if no_landlock_baseline and "c_measured_syscall_time_ns" in base_stats:
+            overhead = estimate_landlock_overhead(
+                base_stats["c_measured_syscall_time_ns"], no_landlock_baseline
+            )
+            if overhead is not None:
+                print(f"  Estimated landlock overhead (vs no-landlock): {overhead:.1f}%")
+                # Show histogram comparison between landlock and no-landlock
+                landlock_hist = base_stats["c_measured_syscall_time_ns"].histogram
+                no_landlock_hist = no_landlock_baseline.histogram
+                if landlock_hist and no_landlock_hist:
+                    print(f"  Histogram comparison (no-landlock vs landlock):")
+                    print_histograms_side_by_side(no_landlock_hist, landlock_hist, indent=4)
 
     for variant in test_variants:
         if test_desc not in tests[variant]:
@@ -397,4 +443,20 @@ for test_desc in test_descs_ordered:
                     print("    (No significant difference)")
                 if base_stat.histogram and stat.histogram:
                     print_histograms_side_by_side(base_stat.histogram, stat.histogram, indent=6)
+
+        # Estimate landlock overhead for this variant as well
+        if test_desc.landlock:
+            no_landlock_baseline = get_no_landlock_baseline(tests[variant], test_desc.dir_depth)
+            if no_landlock_baseline and "c_measured_syscall_time_ns" in variant_stats:
+                overhead = estimate_landlock_overhead(
+                    variant_stats["c_measured_syscall_time_ns"], no_landlock_baseline
+                )
+                if overhead is not None:
+                    print(f"    Estimated landlock overhead (vs no-landlock): {overhead:.1f}%")
+                    # Show histogram comparison between landlock and no-landlock
+                    landlock_hist = variant_stats["c_measured_syscall_time_ns"].histogram
+                    no_landlock_hist = no_landlock_baseline.histogram
+                    if landlock_hist and no_landlock_hist:
+                        print(f"    Histogram comparison (no-landlock vs landlock):")
+                        print_histograms_side_by_side(no_landlock_hist, landlock_hist, indent=6)
         print("")
