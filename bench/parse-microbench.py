@@ -267,7 +267,8 @@ def print_histograms_side_by_side(hist1: List[dict], hist2: List[dict], indent: 
         hist2.pop()
         trimed_end_2 = True
 
-    if not hist1[i:] or not hist2[j:]:
+    # Check if there are valid buckets remaining after trimming
+    if i >= len(hist1) or j >= len(hist2):
         return
 
     max_max_digits = max(
