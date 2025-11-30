@@ -239,15 +239,26 @@ def print_histograms_side_by_side(hist1: List[dict], hist2: List[dict], indent: 
     max_count = max(
         bucket["count"] for bucket in hist1 + hist2
     )
+    count_thres = max(1, max_count // 40)
+
+    while hist1 and hist1[i]["count"] < count_thres:
+        i += 1
+    while hist2 and hist2[j]["count"] < count_thres:
+        j += 1
+
+    while hist1 and hist1[-1]["count"] < count_thres:
+        hist1.pop()
+        trimed_end_1 = True
+    while hist2 and hist2[-1]["count"] < count_thres:
+        hist2.pop()
+        trimed_end_2 = True
 
     max_max_digits = max(
-        len(str(bucket["max"])) for bucket in hist1 + hist2
+        len(str(bucket["max"])) for bucket in hist1[i:] + hist2[j:]
     )
     max_min_digits = max(
-        len(str(bucket["min"])) for bucket in hist1 + hist2
+        len(str(bucket["min"])) for bucket in hist1[i:] + hist2[j:]
     )
-
-    count_thres = max(1, max_count // 40)
 
     def format_bucket(bucket: dict) -> str:
         nb_of_stars = int((bucket["count"] / max_count) * 40)
@@ -255,16 +266,6 @@ def print_histograms_side_by_side(hist1: List[dict], hist2: List[dict], indent: 
         return f"[{bucket['min']:>{max_min_digits}} .. {bucket['max']:>{max_max_digits}}]: {stars:<40}"
 
     placeholder = ' ' * len(format_bucket({"min":0,"max":0,"count":max_count}))
-
-    while hist1 and hist2 and hist1[i]["count"] < count_thres and hist2[j]["count"] < count_thres:
-        i += 1
-        j += 1
-
-    trimed_end = False
-    while hist1 and hist2 and hist1[-1]["count"] < count_thres and hist2[-1]["count"] < count_thres:
-        hist1.pop()
-        hist2.pop()
-        trimed_end = True
 
     if i > 0 and j > 0:
         print(f"{' ' * indent}   ...")
@@ -291,7 +292,7 @@ def print_histograms_side_by_side(hist1: List[dict], hist2: List[dict], indent: 
         print(f"{' ' * indent}{placeholder}    {format_bucket(b2)}")
         j += 1
 
-    if trimed_end:
+    if trimed_end_1 and trimed_end_2:
         print(f"{' ' * indent}   ...")
 
 def merge_results(stats1: Stats, stats2: Stats) -> Stats:
