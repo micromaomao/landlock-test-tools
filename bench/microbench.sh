@@ -11,7 +11,7 @@
 
 set -e -u -o pipefail
 
-NUM_ITERATIONS="5000000"
+NUM_ITERATIONS="15000000"
 
 DIRNAME="$(dirname -- "${BASH_SOURCE[0]}")"
 BASENAME="$(basename -- "${BASH_SOURCE[0]}")"
@@ -36,6 +36,8 @@ print_usage() {
 	echo "  --perf-trace-openat"
 	echo "      Use perf trace to measure openat syscall."
 	echo "      Tends to slow things down.  Mutually exclusive with --bpftrace."
+	echo "  --num-iterations <number>"
+	echo "      Number of openat iterations per test (default: ${NUM_ITERATIONS})."
 	exit 1
 }
 
@@ -75,6 +77,14 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--perf-trace-openat)
 			PERF_TRACE_OPENAT=1
+			shift
+			;;
+		--num-iterations)
+			shift
+			if [[ $# -eq 0 ]]; then
+				print_usage
+			fi
+			NUM_ITERATIONS="$1"
 			shift
 			;;
 		*)
