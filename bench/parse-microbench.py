@@ -354,6 +354,9 @@ for test_desc in test_descs_ordered:
     base_stats = tests[base_variant][test_desc]
     print(f"  {base_variant}:")
     for metric_name in metrics_ordered:
+        if metric_name not in base_stats:
+            print(f"    {metric_name}: no data")
+            continue
         base_stat = base_stats[metric_name]
         print(f"    {metric_name}: {base_stat.count} samples ({base_stat.batch_count} trials), "
               f"avg={base_stat.avg:.2f}, min={base_stat.min:.2f}, "
@@ -373,8 +376,6 @@ for test_desc in test_descs_ordered:
             if metric_name not in variant_stats:
                 print(f"    {metric_name}: no data")
                 continue
-            base_stat = base_stats[metric_name]
-            base_low, base_high = base_stat.p95_confidence()
             stat = variant_stats[metric_name]
             print(f"    {metric_name}: {stat.count} samples ({stat.batch_count} trials), "
                   f"avg={stat.avg:.2f}, min={stat.min:.2f}, "
@@ -382,14 +383,17 @@ for test_desc in test_descs_ordered:
                   f"stddev={stat.stddev:.2f}")
             test_low, test_high = stat.p95_confidence()
             print(f"    95% confidence interval: [{test_low:.2f} .. {test_high:.2f}]")
-            if test_high < base_low:
-                change = (base_stat.avg - stat.avg) / base_stat.avg * 100
-                print(f"    ** Improved {change:.1f}% **")
-            elif test_low > base_high:
-                change = (stat.avg - base_stat.avg) / base_stat.avg * 100
-                print(f"    ** Worsened {change:.1f}% **")
-            else:
-                print("    (No significant difference)")
-            if base_stat.histogram and stat.histogram:
-                print_histograms_side_by_side(base_stat.histogram, stat.histogram, indent=6)
+            if metric_name in base_stats:
+                base_stat = base_stats[metric_name]
+                base_low, base_high = base_stat.p95_confidence()
+                if test_high < base_low:
+                    change = (base_stat.avg - stat.avg) / base_stat.avg * 100
+                    print(f"    ** Improved {change:.1f}% **")
+                elif test_low > base_high:
+                    change = (stat.avg - base_stat.avg) / base_stat.avg * 100
+                    print(f"    ** Worsened {change:.1f}% **")
+                else:
+                    print("    (No significant difference)")
+                if base_stat.histogram and stat.histogram:
+                    print_histograms_side_by_side(base_stat.histogram, stat.histogram, indent=6)
         print("")
